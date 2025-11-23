@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -24,6 +24,7 @@ export function Tutorial({
 }: TutorialProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const currentStepData = steps[currentStep];
+  const [targetBounds, setTargetBounds] = useState<DOMRect | null>(null);
 
   // Вычисляем позицию диалога относительно целевого элемента
   const getDialogPosition = () => {
@@ -67,14 +68,36 @@ export function Tutorial({
     }
   };
 
-  // Подсвечиваем целевой элемент
+  // Подсвечиваем целевой элемент и кэшируем его позицию
   useEffect(() => {
-    if (!isActive || !currentStepData?.targetElement) return;
+    if (!isActive || !currentStepData?.targetElement) {
+      setTargetBounds(null);
+      return;
+    }
 
     const targetEl = document.querySelector(currentStepData.targetElement);
-    if (targetEl) {
-      targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
+    if (!targetEl) return;
+
+    // Прокрутить к элементу только при первой активации
+    targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    const updateBounds = () => {
+      const el = document.querySelector(currentStepData.targetElement);
+      if (el) {
+        setTargetBounds(el.getBoundingClientRect());
+      }
+    };
+
+    updateBounds();
+
+    // Обновляем позицию при изменении размера окна или прокрутке
+    window.addEventListener('resize', updateBounds);
+    window.addEventListener('scroll', updateBounds, true);
+
+    return () => {
+      window.removeEventListener('resize', updateBounds);
+      window.removeEventListener('scroll', updateBounds, true);
+    };
   }, [isActive, currentStep, currentStepData]);
 
   if (!isActive) return null;
@@ -85,19 +108,19 @@ export function Tutorial({
     <AnimatePresence>
       {isActive && (
         <>
-          {/* Блюр фона */}
+          {/* Затемнение фона */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.3 }}
-            className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-md"
+            className="fixed inset-0 z-[100] bg-black/70"
             onClick={onClose}
             data-testid="tutorial-overlay"
           />
 
           {/* Подсветка целевого элемента */}
-          {currentStepData?.targetElement && (
+          {currentStepData?.targetElement && targetBounds && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -105,20 +128,18 @@ export function Tutorial({
               transition={{ duration: 0.4 }}
               className="fixed z-[101] pointer-events-none"
               style={{
-                ...((() => {
-                  const targetEl = document.querySelector(currentStepData.targetElement);
-                  if (!targetEl) return {};
-                  const rect = targetEl.getBoundingClientRect();
-                  return {
-                    top: rect.top - 8,
-                    left: rect.left - 8,
-                    width: rect.width + 16,
-                    height: rect.height + 16,
-                  };
-                })()),
+                top: targetBounds.top - 8,
+                left: targetBounds.left - 8,
+                width: targetBounds.width + 16,
+                height: targetBounds.height + 16,
               }}
             >
-              <div className="h-full w-full rounded-lg ring-4 ring-primary ring-offset-2 ring-offset-background animate-pulse-scale" />
+              <div 
+                className="h-full w-full rounded-lg border-3 border-primary shadow-[0_0_12px_rgba(237,183,73,0.4)]"
+                style={{
+                  animation: 'tutorial-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                }}
+              />
             </motion.div>
           )}
 
@@ -129,7 +150,7 @@ export function Tutorial({
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
             transition={{ duration: 0.4, ease: 'easeOut' }}
-            className="fixed z-[102]"
+            className="fixed z-[103]"
             style={{
               ...dialogPosition,
               maxWidth: '90vw',
