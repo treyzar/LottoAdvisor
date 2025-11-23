@@ -1,37 +1,69 @@
-import { type User, type InsertUser } from "@shared/schema";
-import { randomUUID } from "crypto";
+import type { Lottery } from '@shared/schema';
 
-// modify the interface with any CRUD methods
-// you might need
-
+/**
+ * In-memory хранилище для кэширования данных лотерей
+ * Используется для оптимизации запросов к Stoloto API
+ */
 export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+  // Кэш лотерей
+  getLotteries(): Lottery[];
+  setLotteries(lotteries: Lottery[]): void;
+  getLotteryById(id: string): Lottery | undefined;
+  
+  // Очистка кэша
+  clearCache(): void;
 }
 
 export class MemStorage implements IStorage {
-  private users: Map<string, User>;
+  private lotteriesCache: Lottery[] = [];
+  private cacheTimestamp: number = 0;
+  private readonly CACHE_TTL = 5 * 60 * 1000; // 5 минут
 
   constructor() {
-    this.users = new Map();
+    console.log('MemStorage initialized');
   }
 
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+  /**
+   * Проверяет актуальность кэша
+   */
+  private isCacheValid(): boolean {
+    return Date.now() - this.cacheTimestamp < this.CACHE_TTL;
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+  /**
+   * Получить все лотереи из кэша
+   */
+  getLotteries(): Lottery[] {
+    if (!this.isCacheValid()) {
+      return [];
+    }
+    return this.lotteriesCache;
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
+  /**
+   * Сохранить лотереи в кэш
+   */
+  setLotteries(lotteries: Lottery[]): void {
+    this.lotteriesCache = lotteries;
+    this.cacheTimestamp = Date.now();
+  }
+
+  /**
+   * Получить лотерею по ID
+   */
+  getLotteryById(id: string): Lottery | undefined {
+    if (!this.isCacheValid()) {
+      return undefined;
+    }
+    return this.lotteriesCache.find(l => l.id === id);
+  }
+
+  /**
+   * Очистить кэш
+   */
+  clearCache(): void {
+    this.lotteriesCache = [];
+    this.cacheTimestamp = 0;
   }
 }
 
