@@ -1,4 +1,4 @@
-modules = ["nodejs-20", "web", "go-1.21"]
+modules = ["nodejs-20", "go-1.21", "web"]
 run = "npm run dev"
 hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
 
@@ -13,6 +13,10 @@ run = ["npm", "run", "start"]
 [[ports]]
 localPort = 5000
 externalPort = 80
+
+[[ports]]
+localPort = 35897
+externalPort = 3001
 
 [[ports]]
 localPort = 42127
