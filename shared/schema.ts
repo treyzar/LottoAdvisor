@@ -129,3 +129,32 @@ export const chatMessageSchema = z.object({
 });
 
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
+
+// Типы для StolotoAPI
+export const stolotoDrawSchema = z.object({
+  number: z.number(),
+  drawDate: z.string().optional(),
+  status: z.string().optional(),
+  winningNumbers: z.array(z.number()).optional(),
+});
+
+export type StolotoDraw = z.infer<typeof stolotoDrawSchema>;
+
+export const stolotoGameSchema = z.object({
+  name: z.string(),
+  displayName: z.string(),
+  ticketPrice: z.number(), // в копейках
+  jackpot: z.number(), // в копейках
+  drawFrequency: z.string(),
+  draw: stolotoDrawSchema.optional(),
+  completedDraw: stolotoDrawSchema.optional(),
+});
+
+export type StolotoGame = z.infer<typeof stolotoGameSchema>;
+
+export const stolotoDrawsResponseSchema = z.object({
+  requestStatus: z.string(),
+  games: z.array(stolotoGameSchema),
+});
+
+export type StolotoDrawsResponse = z.infer<typeof stolotoDrawsResponseSchema>;

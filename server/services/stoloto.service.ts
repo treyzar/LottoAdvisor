@@ -1,11 +1,197 @@
-import type { Lottery } from '@shared/schema';
+import type { Lottery, LotteryType, PlayFrequency, StolotoGame, StolotoDrawsResponse } from '@shared/schema';
+import { stolotoDrawsResponseSchema } from '@shared/schema';
 
-/**
- * Сервис для работы с Stoloto API
- * GitHub: https://github.com/D0UP1G/StolotoAPI
- */
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 500;
 
-// Mock данные для демонстрации (позже заменим на реальный API)
+function kopecksToRoubles(kopecks: number): number {
+  return kopecks / 100.0;
+}
+
+function determineLotteryType(name: string): LotteryType {
+  const lowerName = name.toLowerCase();
+  
+  if (lowerName.includes('6x45') || lowerName.includes('5x36') || 
+      lowerName.includes('4x20') || lowerName.includes('7x49')) {
+    return 'числовая';
+  }
+  
+  if (lowerName.includes('rapido') || lowerName.includes('12x24')) {
+    return 'моментальная';
+  }
+  
+  if (lowerName.includes('top3')) {
+    return 'спортлото';
+  }
+  
+  return 'тиражная';
+}
+
+function convertDrawFrequency(frequency: string): PlayFrequency {
+  const lowerFreq = frequency.toLowerCase();
+  
+  if (lowerFreq.includes('daily') || lowerFreq.includes('ежедневно')) {
+    return 'ежедневно';
+  }
+  
+  if (lowerFreq.includes('weekly') || lowerFreq.includes('еженедельно')) {
+    return 'еженедельно';
+  }
+  
+  if (lowerFreq.includes('several') || lowerFreq.includes('несколько')) {
+    return 'несколько раз в неделю';
+  }
+  
+  if (lowerFreq.includes('monthly') || lowerFreq.includes('месяц')) {
+    return 'раз в месяц';
+  }
+  
+  return 'еженедельно';
+}
+
+function generateDescription(displayName: string, lotteryType: LotteryType): string {
+  switch (lotteryType) {
+    case 'числовая':
+      return `${displayName} - популярная числовая лотерея. Выберите числа и выиграйте крупный приз!`;
+    case 'моментальная':
+      return `${displayName} - моментальная лотерея с частыми розыгрышами и быстрыми результатами!`;
+    case 'тиражная':
+      return `${displayName} - классическая тиражная лотерея с большими призами!`;
+    case 'спортлото':
+      return `${displayName} - спортивная лотерея для любителей динамичных игр!`;
+    default:
+      return `${displayName} - увлекательная лотерея с отличными призами!`;
+  }
+}
+
+function generateRules(displayName: string): string {
+  return `Купите билет ${displayName}, выберите числа согласно правилам игры. Розыгрыш проходит согласно расписанию. При совпадении всех чисел вы выигрываете главный приз!`;
+}
+
+function generatePrizeStructure(jackpot: number): Array<{ category: string; prize: string; probability: string }> {
+  const jackpotMln = jackpot / 1000000.0;
+  const secondCategory = jackpot * 0.1;
+  
+  return [
+    {
+      category: 'Джекпот',
+      prize: `${jackpotMln.toFixed(1)} млн ₽`,
+      probability: '1:1000000',
+    },
+    {
+      category: '2 категория',
+      prize: `${secondCategory.toFixed(0)} ₽`,
+      probability: '1:100000',
+    },
+    {
+      category: '3 категория',
+      prize: '10000 ₽',
+      probability: '1:10000',
+    },
+    {
+      category: '4 категория',
+      prize: '1000 ₽',
+      probability: '1:1000',
+    },
+  ];
+}
+
+function estimateWinProbability(name: string): number {
+  const lowerName = name.toLowerCase();
+  
+  if (lowerName.includes('6x45')) {
+    return 0.00001;
+  }
+  
+  if (lowerName.includes('5x36')) {
+    return 0.0001;
+  }
+  
+  if (lowerName.includes('4x20')) {
+    return 0.001;
+  }
+  
+  if (lowerName.includes('rapido') || lowerName.includes('12x24')) {
+    return 0.01;
+  }
+  
+  return 0.0001;
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function doRequestWithRetry(url: string): Promise<Response> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        signal: AbortSignal.timeout(10000),
+      });
+      
+      if (response.ok) {
+        if (attempt > 1) {
+          console.log(`[StolotoService] Успех на попытке ${attempt}/${MAX_RETRIES}`);
+        }
+        return response;
+      }
+      
+      const body = await response.text();
+      lastError = new Error(`StolotoAPI вернул код ${response.status}: ${body}`);
+      
+      if (attempt < MAX_RETRIES) {
+        const delay = RETRY_DELAY * Math.pow(2, attempt - 1);
+        console.log(`[StolotoService] Попытка ${attempt}/${MAX_RETRIES} не удалась: статус ${response.status}. Повторная попытка через ${delay}ms...`);
+        await sleep(delay);
+      }
+    } catch (error) {
+      lastError = error as Error;
+      
+      if (attempt < MAX_RETRIES) {
+        const delay = RETRY_DELAY * Math.pow(2, attempt - 1);
+        console.log(`[StolotoService] Попытка ${attempt}/${MAX_RETRIES} не удалась: ${error}. Повторная попытка через ${delay}ms...`);
+        await sleep(delay);
+      }
+    }
+  }
+  
+  console.log(`[StolotoService] Все ${MAX_RETRIES} попыток исчерпаны. Последняя ошибка: ${lastError}`);
+  throw new Error(`Не удалось выполнить запрос после ${MAX_RETRIES} попыток: ${lastError?.message}`);
+}
+
+function convertGameToLottery(game: StolotoGame): Lottery {
+  const ticketPrice = kopecksToRoubles(game.ticketPrice);
+  const currentJackpot = kopecksToRoubles(game.jackpot);
+  
+  const lotteryType = determineLotteryType(game.name);
+  const drawFrequency = convertDrawFrequency(game.drawFrequency);
+  const description = generateDescription(game.displayName, lotteryType);
+  const rules = generateRules(game.displayName);
+  const prizeStructure = generatePrizeStructure(currentJackpot);
+  const winProbability = estimateWinProbability(game.name);
+  
+  return {
+    id: game.name,
+    name: game.displayName,
+    type: lotteryType,
+    ticketPrice,
+    maxJackpot: currentJackpot,
+    currentJackpot,
+    winProbability,
+    drawFrequency,
+    description,
+    rules,
+    prizeStructure,
+    isActive: true,
+  };
+}
+
 const MOCK_LOTTERIES: Lottery[] = [
   {
     id: '1',
@@ -202,37 +388,67 @@ const MOCK_LOTTERIES: Lottery[] = [
 ];
 
 export class StolotoService {
-  private lotteries: Lottery[] = MOCK_LOTTERIES;
+  private baseURL: string;
+  private lotteries: Lottery[] = [];
 
-  /**
-   * Получить все доступные лотереи
-   */
+  constructor() {
+    this.baseURL = process.env.STOLOTO_API_URL || 'http://localhost:8080';
+  }
+
+  private async fetchFromStolotoAPI(): Promise<Lottery[]> {
+    try {
+      const url = `${this.baseURL}/api/draws/`;
+      console.log(`[StolotoService] Fetching all draws from ${url}`);
+      
+      const response = await doRequestWithRetry(url);
+      const rawData = await response.json();
+      
+      const parseResult = stolotoDrawsResponseSchema.safeParse(rawData);
+      if (!parseResult.success) {
+        console.log('[StolotoService] Ошибка валидации ответа StolotoAPI:', parseResult.error);
+        console.log('[StolotoService] Используем fallback данные');
+        return MOCK_LOTTERIES;
+      }
+      
+      const data = parseResult.data;
+      
+      if (!data.games || data.games.length === 0) {
+        console.log('[StolotoService] StolotoAPI вернул пустой список игр, используем fallback данные');
+        return MOCK_LOTTERIES;
+      }
+      
+      const lotteries = data.games.map(game => convertGameToLottery(game));
+      console.log(`[StolotoService] Успешно загружено ${lotteries.length} лотерей из StolotoAPI`);
+      
+      return lotteries;
+    } catch (error) {
+      console.log(`[StolotoService] Ошибка при запросе к StolotoAPI: ${error}, используем fallback данные`);
+      return MOCK_LOTTERIES;
+    }
+  }
+
   async getAllLotteries(): Promise<Lottery[]> {
-    // TODO: В будущем заменить на реальный API запрос
-    // const response = await fetch('https://stoloto-api/lotteries');
-    // return await response.json();
+    if (this.lotteries.length > 0) {
+      return this.lotteries;
+    }
     
+    this.lotteries = await this.fetchFromStolotoAPI();
     return this.lotteries;
   }
 
-  /**
-   * Получить лотерею по ID
-   */
   async getLotteryById(id: string): Promise<Lottery | null> {
-    const lottery = this.lotteries.find(l => l.id === id);
+    const lotteries = await this.getAllLotteries();
+    const lottery = lotteries.find(l => l.id === id);
     return lottery || null;
   }
 
-  /**
-   * Фильтр лотерей по критериям
-   */
   async filterLotteries(criteria: {
     ticketPrice?: { min: number; max: number };
     lotteryType?: string;
     maxJackpot?: { min: number; max: number };
     winProbability?: { min: number; max: number };
   }): Promise<Lottery[]> {
-    let filtered = this.lotteries;
+    let filtered = await this.getAllLotteries();
 
     if (criteria.ticketPrice) {
       filtered = filtered.filter(
